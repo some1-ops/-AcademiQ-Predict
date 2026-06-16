@@ -463,6 +463,7 @@ def _phased_forecast(df_raw: pd.DataFrame, feat_df: pd.DataFrame,
     df_out["Predicted_Performance"] = ""
     df_out["Predicted_Grade_Point"] = 0
     df_out["Quality_Points"]        = 0.0
+    df_out["Cumulative_CGPA_After"] = 0.0
 
     # Accumulators across all years
     global_qp      = 0.0
@@ -478,7 +479,7 @@ def _phased_forecast(df_raw: pd.DataFrame, feat_df: pd.DataFrame,
 
         year_qp      = 0.0
         year_credits = 0.0
-        course_rows  = []
+        level_results = []
 
         for i in idx:
             cr  = float(pd.to_numeric(df_raw.loc[i, "Credits"], errors="coerce") or 0)
@@ -510,39 +511,50 @@ def _phased_forecast(df_raw: pd.DataFrame, feat_df: pd.DataFrame,
 
             year_qp      += qp
             year_credits += cr
+            
+            level_results.append({
+                "index": i,
+                "cr": cr,
+                "ts": ts,
+                "gp": gp,
+                "label": label,
+                "phase_tag": phase_tag,
+                "qp": qp
+            })
 
+        global_qp += year_qp
+        global_credits += year_credits
+
+        cum_cgpa = round(global_qp / global_credits, 4) if global_credits > 0 else 0.0
+        year_cgpa = round(year_qp / year_credits, 2) if year_credits > 0 else 0.0
+
+        course_rows = []
+        for res in level_results:
+            i = res["index"]
             # Write back to df_out
-            df_out.at[i, "Phase"]                 = phase_tag
-            df_out.at[i, "Predicted_Performance"] = label
-            df_out.at[i, "Predicted_Grade_Point"] = gp
-            df_out.at[i, "Quality_Points"]        = qp
+            df_out.at[i, "Phase"]                 = res["phase_tag"]
+            df_out.at[i, "Predicted_Performance"] = res["label"]
+            df_out.at[i, "Predicted_Grade_Point"] = res["gp"]
+            df_out.at[i, "Quality_Points"]        = res["qp"]
+            df_out.at[i, "Cumulative_CGPA_After"] = round(cum_cgpa, 2)
 
             course_rows.append({
                 "Course_Code":   df_raw.loc[i, "Course_Code"] if "Course_Code" in df_raw.columns else str(i),
                 "Semester":      df_raw.loc[i, "Semester"] if "Semester" in df_raw.columns else "",
-                "Credits":       cr,
-                "Total_Score":   round(ts, 1),
-                "Performance":   label,
-                "Grade_Point":   gp,
-                "Quality_Points": round(qp, 1),
-                "Phase":         phase_tag,
+                "Credits":       res["cr"],
+                "Total_Score":   round(res["ts"], 1),
+                "Performance":   res["label"],
+                "Grade_Point":   res["gp"],
+                "Quality_Points": round(res["qp"], 1),
+                "Cum_CGPA":      round(cum_cgpa, 2),
+                "Phase":         res["phase_tag"],
             })
-
-        # Add year to global tallies
-        global_qp      += year_qp
-        global_credits += year_credits
-
-        cum_cgpa = round(global_qp / global_credits, 4) if global_credits > 0 else 0.0
-
-        # Year-level CGPA (only courses in this level)
-        year_cgpa = round(year_qp / year_credits, 2) if year_credits > 0 else 0.0
-        cum_cgpa  = round(global_qp / global_credits, 2) if global_credits > 0 else 0.0
 
         phases.append({
             "level":      level,
             "is_actual":  is_yr1,
             "year_cgpa":  year_cgpa,
-            "cum_cgpa":   cum_cgpa,
+            "cum_cgpa":   round(cum_cgpa, 2),
             "year_qp":    round(year_qp, 1),
             "year_cr":    int(year_credits),
             "course_df": pd.DataFrame(course_rows),
@@ -692,84 +704,222 @@ def _render_timeline(model, user):
     """, unsafe_allow_html=True)
 
     # ═════════════════════════════════════════════════════════════════════════
-    # 2. Year-by-Year Summary UI
+    # 2. Year-strip — CGPA per level at a glance
+    # ═════════════════════════════════════════════════════════════════════════
+    strip_cols = st.columns(len(phases))
+    for col_ui, ph in zip(strip_cols, phases):
+        clr   = _cgpa_colour(ph["cum_cgpa"])
+        badge = "✅ Actual" if ph["is_actual"] else "🔮 Predicted"
+        with col_ui:
+            st.markdown(f"""
+            <div style='background:#1e2538; border:1px solid {clr}44;
+                        border-radius:14px; padding:1rem 0.8rem; text-align:center;'>
+                <div style='font-size:0.65rem; color:{clr}88; letter-spacing:0.08em;
+                            text-transform:uppercase; margin-bottom:0.2rem;'>{ph['level']}</div>
+                <div style='font-size:1.9rem; font-weight:800; color:{clr};
+                            line-height:1; margin-bottom:0.2rem;'>{ph['cum_cgpa']:.2f}</div>
+                <div style='font-size:0.68rem; color:{clr}99; margin-bottom:0.3rem;'>Cum. CGPA</div>
+                <div style='display:inline-block; background:{clr}18;
+                            border:1px solid {clr}44; border-radius:10px;
+                            padding:0.15rem 0.6rem; font-size:0.65rem; color:{clr};'>{badge}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # 3. Per-level expander cards
     # ═════════════════════════════════════════════════════════════════════════
     st.markdown("<br/>", unsafe_allow_html=True)
-    st.markdown("#### 📅 Year-by-Year Summary")
+    st.markdown("#### 📚 Year-by-Year Breakdown")
 
     for ph in phases:
-        level = ph["level"]
-        is_act = ph["is_actual"]
-        yr_gpa = ph["year_cgpa"]
-        cum_cgpa = ph["cum_cgpa"]
-        clr = _cgpa_colour(cum_cgpa)
+        level    = ph["level"]
+        clr      = _cgpa_colour(ph["cum_cgpa"])
+        is_act   = ph["is_actual"]
+        label_yr = "Actual GPA (base truth)" if is_act else "Predicted Cumulative CGPA"
+        icon_yr  = "📐" if is_act else "🔮"
 
-        if is_act:
-            badge_text = "Actual"
-            gpa_label = "Actual Yearly GPA"
-            cgpa_label = "Cumulative CGPA"
-            icon = "📐"
-        else:
-            badge_text = "Predicted"
-            gpa_label = "Predicted Yearly GPA"
-            cgpa_label = "Forecasted CGPA"
-            icon = "🔮"
+        with st.expander(
+            f"{icon_yr}  {level}  —  {label_yr}: **{ph['cum_cgpa']:.2f}**",
+            expanded=(ph == phases[0]),   # expand Year 1 by default
+        ):
+            # Mini metrics row
+            m1, m2, m3, m4 = st.columns(4)
+            with m1:
+                st.markdown(f"""
+                <div style='background:#1e2538; border:1px solid {clr}33;
+                            border-radius:10px; padding:0.6rem 0.8rem; text-align:center;'>
+                    <div style='font-size:0.62rem; color:#7c8db5; text-transform:uppercase;'>Year CGPA</div>
+                    <div style='font-size:1.3rem; font-weight:700; color:{clr};'>{ph['year_cgpa']:.2f}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with m2:
+                st.markdown(f"""
+                <div style='background:#1e2538; border:1px solid {clr}33;
+                            border-radius:10px; padding:0.6rem 0.8rem; text-align:center;'>
+                    <div style='font-size:0.62rem; color:#7c8db5; text-transform:uppercase;'>Cum. CGPA</div>
+                    <div style='font-size:1.3rem; font-weight:700; color:{clr};'>{ph['cum_cgpa']:.2f}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with m3:
+                st.markdown(f"""
+                <div style='background:#1e2538; border:1px solid #3b82f633;
+                            border-radius:10px; padding:0.6rem 0.8rem; text-align:center;'>
+                    <div style='font-size:0.62rem; color:#7c8db5; text-transform:uppercase;'>Credits</div>
+                    <div style='font-size:1.3rem; font-weight:700; color:#3b82f6;'>{ph['year_cr']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+            with m4:
+                st.markdown(f"""
+                <div style='background:#1e2538; border:1px solid #6366f133;
+                            border-radius:10px; padding:0.6rem 0.8rem; text-align:center;'>
+                    <div style='font-size:0.62rem; color:#7c8db5; text-transform:uppercase;'>Quality Pts</div>
+                    <div style='font-size:1.3rem; font-weight:700; color:#6366f1;'>{ph['year_qp']:.0f}</div>
+                </div>
+                """, unsafe_allow_html=True)
 
-        st.markdown(f"""
-        <div style='background:#1e2538; border-left:4px solid {clr}; border-radius:8px;
-                    padding:1.2rem; margin-bottom:1rem; display:flex; align-items:center;
-                    justify-content:space-between; box-shadow:0 4px 6px rgba(0,0,0,0.1);'>
-            <div style='display:flex; align-items:center; gap:1rem;'>
-                <div style='font-size:1.6rem; margin-right:0.5rem;'>{icon}</div>
-                <div style='font-size:1.5rem; font-weight:800; color:#e2e8f0; width:60px;'>{level}</div>
-                <div style='display:inline-block; background:{clr}18; border:1px solid {clr}44;
-                            border-radius:12px; padding:0.2rem 0.6rem; font-size:0.75rem; color:{clr}; font-weight:600;'>
-                    {badge_text}
-                </div>
-            </div>
-            <div style='display:flex; gap:2.5rem; text-align:right;'>
-                <div>
-                    <div style='font-size:0.75rem; color:#7c8db5; text-transform:uppercase;'>{gpa_label}</div>
-                    <div style='font-size:1.4rem; font-weight:700; color:#e2e8f0;'>{yr_gpa:.2f}</div>
-                </div>
-                <div>
-                    <div style='font-size:0.75rem; color:#7c8db5; text-transform:uppercase;'>{cgpa_label}</div>
-                    <div style='font-size:1.4rem; font-weight:700; color:{clr};'>{cum_cgpa:.2f}</div>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+            st.markdown("<br/>", unsafe_allow_html=True)
+
+            # Course table — style Performance column by class colour
+            cdf = ph["course_df"].copy()
+            if "Phase" in cdf.columns:
+                cdf = cdf.drop(columns=["Phase"])
+
+            def _style_perf(col):
+                if col.name == "Performance":
+                    return [f"color:{CLASS_COLOURS.get(v,'#e2e8f0')};font-weight:600" for v in col]
+                return ["" for _ in col]
+
+            st.dataframe(
+                cdf.style.apply(_style_perf, axis=0),
+                use_container_width=True,
+                hide_index=True,
+                height=min(350, 38 + len(cdf) * 36),
+            )
+
+            if is_act:
+                st.caption(
+                    "ℹ️ Year 1 grades are calculated from actual scores using the standard "
+                    "5.0 scale (≥70→5, 60–69→4, 50–59→3, 45–49→2, <45→0). "
+                    "No machine learning model is used for this baseline year."
+                )
+            else:
+                prev = phases[phases.index(ph) - 1]
+                st.caption(
+                    f"🔮 J48 model predictions used. Previous year's cumulative CGPA "
+                    f"(**{prev['cum_cgpa']:.2f}**) was passed as the Previous GPA feature "
+                    f"for every {level} course."
+                )
 
     # ═════════════════════════════════════════════════════════════════════════
-    # 3. Downloads
+    # 4. Global trend chart (Cumulative CGPA after each Level)
     # ═════════════════════════════════════════════════════════════════════════
     st.markdown("<br/>", unsafe_allow_html=True)
-    st.markdown("##### 📥 Export Forecast Data")
+    st.markdown("##### 📈 Cumulative CGPA Trajectory (Year-by-Year)")
 
-    display_cols = [c for c in [
-        "Course_Code", "Level", "Semester", "Credits",
-        "CA_Score", "Exam_Score", "Total_Score",
-        "Phase", "Predicted_Performance", "Predicted_Grade_Point",
-        "Quality_Points",
-    ] if c in df_out.columns]
+    level_names = [p["level"] for p in phases]
+    level_cgpas = [p["cum_cgpa"] for p in phases]
+    level_phases = ["Actual" if p["is_actual"] else "Predicted" for p in phases]
 
-    c1, c2, _ = st.columns([1, 1, 2])
-    with c1:
+    fig, ax = plt.subplots(figsize=(max(7, len(level_names) * 1.5), 4))
+    fig.patch.set_facecolor("#1a1f2e")
+    ax.set_facecolor("#1a1f2e")
+
+    xs = list(range(len(level_names)))
+
+    # Shade actual (Phase 1) vs predicted regions
+    act_end = sum(1 for p in level_phases if p == "Actual") - 1
+    if act_end >= 0:
+        ax.axvspan(-0.5, act_end + 0.5, alpha=0.06, color="#22c55e", label="_nolegend_")
+        ax.text(act_end / 2, 5.0, "Actual", ha="center", va="top",
+                color="#22c55e", fontsize=8, alpha=0.7)
+    if act_end < len(level_names) - 1:
+        ax.axvspan(act_end + 0.5, len(level_names) - 0.5, alpha=0.05,
+                   color="#3b82f6", label="_nolegend_")
+        ax.text((act_end + len(level_names)) / 2, 5.0, "Predicted", ha="center", va="top",
+                color="#3b82f6", fontsize=8, alpha=0.7)
+
+    # Reference grade boundaries
+    for ref, lbl in [(4.5, "1st Class"), (3.5, "2nd Upper"),
+                     (2.5, "2nd Lower"), (1.5, "3rd Class")]:
+        ax.axhline(ref, color="#2d3555", linewidth=0.8, linestyle="--")
+        ax.text(len(xs) - 0.5, ref + 0.07, lbl,
+                ha="right", va="bottom", color="#3a4565", fontsize=8)
+
+    ax.fill_between(xs, level_cgpas, alpha=0.12, color=final_colour)
+    ax.plot(xs, level_cgpas, color=final_colour, linewidth=2.5, zorder=3)
+
+    # Dots coloured by phase
+    for xi, (yv, phase) in enumerate(zip(level_cgpas, level_phases)):
+        dot_clr = "#22c55e" if phase == "Actual" else "#3b82f6"
+        marker  = "D" if phase == "Actual" else "o"
+        ax.scatter(xi, yv, color=dot_clr, s=80, zorder=4,
+                   edgecolors="#1a1f2e", linewidths=1.5, marker=marker)
+
+    ax.set_xlim(-0.5, len(xs) - 0.5)
+    ax.set_ylim(0, 5.3)
+    ax.set_xticks(xs)
+    ax.set_xticklabels(level_names, color="#7c8db5", fontsize=9)
+    ax.set_ylabel("Cumulative CGPA", color="#a3b3d4", fontsize=9)
+    ax.set_title("End-of-Year Cumulative CGPA Trajectory",
+                 color="#e2e8f0", fontsize=10, pad=10)
+    ax.tick_params(colors="#a3b3d4", labelsize=8)
+    ax.spines["top"].set_visible(False);   ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#2d3555"); ax.spines["bottom"].set_color("#2d3555")
+
+    legend_items = [
+        plt.Line2D([0],[0], marker="D", color="#22c55e", markersize=6,
+                   label="Actual Base Truth", linestyle="None"),
+        plt.Line2D([0],[0], marker="o", color="#3b82f6", markersize=6,
+                   label="Predicted Forecast", linestyle="None"),
+    ]
+    ax.legend(handles=legend_items, loc="lower right", framealpha=0.15,
+              labelcolor="#c4cfea", fontsize=8, edgecolor="#2d3555")
+
+    fig.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # 5. Full breakdown table + downloads
+    # ═════════════════════════════════════════════════════════════════════════
+    st.markdown("<br/>", unsafe_allow_html=True)
+    with st.expander("📋 Full Course-by-Course Data Table", expanded=False):
+        display_cols = [c for c in [
+            "Course_Code", "Level", "Semester", "Credits",
+            "CA_Score", "Exam_Score", "Total_Score",
+            "Phase", "Predicted_Performance", "Predicted_Grade_Point",
+            "Quality_Points", "Cumulative_CGPA_After",
+        ] if c in df_out.columns]
+
+        def _colour_phase(col):
+            if col.name == "Predicted_Performance":
+                return [f"color:{CLASS_COLOURS.get(v,'#e2e8f0')};font-weight:600" for v in col]
+            if col.name == "Phase":
+                return [
+                    "color:#22c55e;font-weight:500" if v == "Actual" else "color:#3b82f6;"
+                    for v in col
+                ]
+            return ["" for _ in col]
+
+        st.dataframe(
+            df_out[display_cols].style.apply(_colour_phase, axis=0),
+            use_container_width=True,
+            hide_index=True,
+            height=min(500, 38 + len(df_out) * 35),
+        )
+
         csv_bytes = df_out[display_cols].to_csv(index=False).encode()
         st.download_button(
-            "⬇️  Download CSV",
+            "⬇️  Download as CSV",
             csv_bytes,
             file_name="phased_cgpa_forecast.csv",
             mime="text/csv",
-            use_container_width=True,
         )
-    with c2:
         buf = io.BytesIO()
         df_out[display_cols].to_excel(buf, index=False, engine="openpyxl")
         st.download_button(
-            "⬇️  Download Excel",
+            "⬇️  Download as Excel",
             buf.getvalue(),
             file_name="phased_cgpa_forecast.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
         )
