@@ -15,6 +15,7 @@ REQUIRED_COLUMNS = [
     "Study Hours",
     "Class Participation",
     "Previous GPA",
+    "Academic_Momentum",
     "Performance Class",
 ]
 
@@ -30,6 +31,7 @@ RANGE_RULES = {
     "Study Hours":         (0,   168),
     "Class Participation": (1,   5),
     "Previous GPA":        (0.0, 4.0),
+    "Academic_Momentum":   (-5.0, 5.0),
 }
 
 

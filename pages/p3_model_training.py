@@ -72,6 +72,13 @@ def show():
     """, unsafe_allow_html=True)
 
     # ── Train button ──────────────────────────────────────────────────────
+    algorithm_choice = st.radio(
+        "Select Prediction Engine:",
+        options=["J48 Decision Tree (Legacy)", "Random Forest (Recommended)"],
+        horizontal=True
+    )
+    algo_key = "rf" if "Random Forest" in algorithm_choice else "j48"
+
     col_btn, col_hint = st.columns([2, 5])
     with col_btn:
         train_clicked = st.button("🚀  Train Model", type="primary", use_container_width=True)
@@ -90,9 +97,9 @@ def show():
 
     # ── Training logic ────────────────────────────────────────────────────
     if train_clicked:
-        with st.spinner("Training Decision Tree…"):
+        with st.spinner(f"Training {algorithm_choice}…"):
             try:
-                model, metrics = train_model(df)
+                model, metrics = train_model(df, algorithm=algo_key)
                 path = save_model(model)
 
                 log_training_run(
@@ -151,7 +158,8 @@ def show():
 
     with tab1:
         st.markdown("#### Decision Tree Visualization")
-        depth_limit = st.slider("Display depth (levels)", 2, min(8, model.get_depth() or 4), 4,
+        actual_depth = model.get_depth() if hasattr(model, "get_depth") else (model.estimators_[0].get_depth() if hasattr(model, "estimators_") else 4)
+        depth_limit = st.slider("Display depth (levels)", 2, min(8, actual_depth or 4), 4,
                                 key="tree_depth_slider")
         with st.spinner("Rendering tree…"):
             fig = plot_decision_tree(model, max_depth_display=depth_limit)
@@ -164,11 +172,11 @@ def show():
         <div style='background:#1a2040; border:1px solid #2d3555; border-radius:10px;
                     padding:0.75rem 1.2rem; margin-top:0.5rem;'>
             <b style='color:#60a5fa;'>Tree Stats:</b>
-            <span style='color:#e2e8f0; margin-left:1rem;'>Full Depth: {model.get_depth()}</span>
+            <span style='color:#e2e8f0; margin-left:1rem;'>Full Depth: {model.get_depth() if hasattr(model, "get_depth") else "N/A"}</span>
             <span style='color:#4a5580; margin: 0 0.5rem;'>|</span>
-            <span style='color:#e2e8f0;'>Leaf Nodes: {model.get_n_leaves()}</span>
+            <span style='color:#e2e8f0;'>Leaf Nodes: {model.get_n_leaves() if hasattr(model, "get_n_leaves") else "N/A"}</span>
             <span style='color:#4a5580; margin: 0 0.5rem;'>|</span>
-            <span style='color:#e2e8f0;'>Criterion: Entropy (J48)</span>
+            <span style='color:#e2e8f0;'>Criterion: {"Gini (RF)" if hasattr(model, "estimators_") else "Entropy (J48)"}</span>
         </div>
         """, unsafe_allow_html=True)
 

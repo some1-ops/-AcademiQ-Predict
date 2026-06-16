@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Tuple, Dict, Any, Optional
 
 from sklearn.tree import DecisionTreeClassifier, plot_tree, export_text
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score,
@@ -62,13 +63,6 @@ def estimate_cgpa(predicted_class: str, previous_gpa: float) -> float:
     - Map predicted_class → semester GPA baseline (5.0 scale).
     - If previous_gpa == 0 (first-year / no history), return the baseline.
     - Otherwise return (previous_gpa + semester_gpa) / 2, rounded to 2 d.p.
-
-    Args:
-        predicted_class: One of Excellent / Good / Average / Poor / Fail.
-        previous_gpa:    Student's previous GPA (0–4.0 or 0–5.0 scale input).
-
-    Returns:
-        Estimated CGPA rounded to 2 decimal places.
     """
     semester_gpa = _CLASS_GPA_MAP.get(predicted_class, 2.5)  # default Average
     if previous_gpa == 0:
@@ -77,9 +71,9 @@ def estimate_cgpa(predicted_class: str, previous_gpa: float) -> float:
 
 
 # ── Training ──────────────────────────────────────────────────────────────────
-def train_model(df: pd.DataFrame) -> Tuple[DecisionTreeClassifier, Dict[str, Any]]:
+def train_model(df: pd.DataFrame, algorithm: str = "j48") -> Tuple[Any, Dict[str, Any]]:
     """
-    Train a Decision Tree (entropy, J48-equivalent) on the provided DataFrame.
+    Train a model (Decision Tree or Random Forest) on the provided DataFrame.
 
     Returns:
         (fitted_model, metrics_dict)
@@ -91,13 +85,23 @@ def train_model(df: pd.DataFrame) -> Tuple[DecisionTreeClassifier, Dict[str, Any
         X, y, test_size=0.20, random_state=42, stratify=y
     )
 
-    model = DecisionTreeClassifier(
-        criterion="entropy",
-        random_state=42,
-        max_depth=None,        # unconstrained (mirrors WEKA J48 default)
-        min_samples_split=2,
-        min_samples_leaf=1,
-    )
+    if algorithm == "rf":
+        model = RandomForestClassifier(
+            n_estimators=100,
+            max_depth=6,
+            class_weight="balanced",
+            random_state=42,
+            n_jobs=-1,
+        )
+    else:
+        model = DecisionTreeClassifier(
+            criterion="entropy",
+            random_state=42,
+            max_depth=5,
+            min_samples_split=2,
+            min_samples_leaf=4,
+        )
+        
     model.fit(X_train, y_train)
 
     y_pred = model.predict(X_test)
@@ -127,13 +131,13 @@ def train_model(df: pd.DataFrame) -> Tuple[DecisionTreeClassifier, Dict[str, Any
 
 
 # ── Persistence ───────────────────────────────────────────────────────────────
-def save_model(model: DecisionTreeClassifier) -> str:
+def save_model(model: Any) -> str:
     DATA_DIR.mkdir(exist_ok=True)
     joblib.dump(model, str(MODEL_PATH))
     return str(MODEL_PATH)
 
 
-def load_model() -> Optional[DecisionTreeClassifier]:
+def load_model() -> Optional[Any]:
     if MODEL_PATH.exists():
         try:
             return joblib.load(str(MODEL_PATH))
@@ -147,18 +151,18 @@ def model_is_trained() -> bool:
 
 
 # ── Prediction ────────────────────────────────────────────────────────────────
-def predict_single(model: DecisionTreeClassifier, feature_values: list) -> str:
+def predict_single(model: Any, feature_values: list) -> str:
     """Predict performance class for a single student feature vector."""
     arr = np.array(feature_values, dtype=float, ndmin=2).reshape(1, -1)
     return model.predict(arr)[0]
 
 
-def predict_batch(model: DecisionTreeClassifier, df: pd.DataFrame) -> pd.DataFrame:
+def predict_batch(model: Any, df: pd.DataFrame) -> pd.DataFrame:
     """
     Predict for all rows in df.
 
     Adds two columns:
-      - ``Predicted_Performance`` — J48 decision-tree class label.
+      - ``Predicted_Performance`` — J48 decision-tree or RF class label.
       - ``Estimated_CGPA``        — heuristic CGPA on the 5.0 scale.
     """
     X = df[FEATURE_COLUMNS].to_numpy(dtype=float)
@@ -209,10 +213,11 @@ def plot_confusion_matrix(cm: np.ndarray, labels: list) -> plt.Figure:
     return fig
 
 
-def plot_decision_tree(model: DecisionTreeClassifier,
+def plot_decision_tree(model: Any,
                        max_depth_display: int = 4) -> plt.Figure:
     """Render the decision tree. Limits visual depth for readability."""
-    n_classes = len(model.classes_)
+    tree_to_plot = model.estimators_[0] if hasattr(model, "estimators_") else model
+    n_classes = len(tree_to_plot.classes_)
     fig_w = max(20, n_classes * 5)
     fig_h = max(10, min(max_depth_display * 3, 20))
 
@@ -221,10 +226,10 @@ def plot_decision_tree(model: DecisionTreeClassifier,
     ax.set_facecolor("#1a1f2e")
 
     plot_tree(
-        model,
+        tree_to_plot,
         max_depth=max_depth_display,
         feature_names=FEATURE_COLUMNS,
-        class_names=model.classes_,
+        class_names=tree_to_plot.classes_,
         filled=True,
         rounded=True,
         impurity=True,
@@ -233,20 +238,23 @@ def plot_decision_tree(model: DecisionTreeClassifier,
         fontsize=8,
     )
 
+    depth = tree_to_plot.get_depth() if hasattr(tree_to_plot, "get_depth") else "?"
+    prefix = "Random Forest (Estimator 0)" if hasattr(model, "estimators_") else "Decision Tree"
     ax.set_title(
-        f"Decision Tree — top {max_depth_display} levels  "
-        f"(full depth: {model.get_depth()})",
+        f"{prefix} — top {max_depth_display} levels  "
+        f"(full depth: {depth})",
         color="#e2e8f0", fontsize=12, pad=8
     )
     fig.tight_layout()
     return fig
 
 
-def get_text_rules(model: DecisionTreeClassifier) -> str:
-    return export_text(model, feature_names=FEATURE_COLUMNS, max_depth=10)
+def get_text_rules(model: Any) -> str:
+    tree_model = model.estimators_[0] if hasattr(model, "estimators_") else model
+    return export_text(tree_model, feature_names=FEATURE_COLUMNS, max_depth=10)
 
 
-def plot_feature_importance(model: DecisionTreeClassifier) -> plt.Figure:
+def plot_feature_importance(model: Any) -> plt.Figure:
     importances = model.feature_importances_
     indices = np.argsort(importances)[::-1]
     sorted_features = [FEATURE_COLUMNS[i] for i in indices]

@@ -19,6 +19,7 @@ _DISTS = {
         "Study Hours":        (20, 4),
         "Class Participation": (4.6, 0.4),
         "Previous GPA":       (3.8, 0.2),
+        "Academic_Momentum":  (0.2, 0.3),
     },
     "Good": {
         "Attendance":         (80, 6),
@@ -27,6 +28,7 @@ _DISTS = {
         "Study Hours":        (14, 4),
         "Class Participation": (3.7, 0.5),
         "Previous GPA":       (3.1, 0.3),
+        "Academic_Momentum":  (0.1, 0.2),
     },
     "Average": {
         "Attendance":         (68, 7),
@@ -35,6 +37,7 @@ _DISTS = {
         "Study Hours":        (9, 3),
         "Class Participation": (2.8, 0.6),
         "Previous GPA":       (2.4, 0.4),
+        "Academic_Momentum":  (-0.1, 0.3),
     },
     "Poor": {
         "Attendance":         (54, 8),
@@ -43,6 +46,7 @@ _DISTS = {
         "Study Hours":        (5, 2),
         "Class Participation": (2.0, 0.6),
         "Previous GPA":       (1.8, 0.4),
+        "Academic_Momentum":  (-0.3, 0.3),
     },
     "Fail": {
         "Attendance":         (38, 10),
@@ -51,6 +55,7 @@ _DISTS = {
         "Study Hours":        (2, 1.5),
         "Class Participation": (1.3, 0.4),
         "Previous GPA":       (1.0, 0.4),
+        "Academic_Momentum":  (-0.5, 0.2),
     },
 }
 
@@ -103,6 +108,11 @@ def generate_mock_dataset(seed: int = 42) -> pd.DataFrame:
         # GPA 0.0 – 4.0
         rows["Previous GPA"] = np.clip(
             rng.normal(dist["Previous GPA"][0], dist["Previous GPA"][1], n), 0.0, 4.0
+        ).round(2)
+
+        # Academic Momentum
+        rows["Academic_Momentum"] = np.clip(
+            rng.normal(dist["Academic_Momentum"][0], dist["Academic_Momentum"][1], n), -5.0, 5.0
         ).round(2)
 
         rows["Performance Class"] = [cls] * n

@@ -171,6 +171,9 @@ def _map_timeline_to_features(df: pd.DataFrame) -> pd.DataFrame:
     # 6. Previous GPA — threaded row-by-row by the calling loop; seed with 0
     out["Previous GPA"] = 0.0
 
+    # 7. Academic Momentum — threaded by the calling loop
+    out["Academic_Momentum"] = 0.0
+
     return out
 
 
@@ -294,9 +297,15 @@ def _render_manual(model, user):
                 )
                 previous_gpa = st.number_input(
                     "Previous GPA",
-                    min_value=0.00, max_value=4.00, value=2.50, step=0.01,
+                    min_value=0.00, max_value=5.00, value=2.50, step=0.01,
                     format="%.2f",
-                    help="GPA on 4.0 scale"
+                    help="GPA on 5.0 scale"
+                )
+                academic_momentum = st.number_input(
+                    "Academic Momentum",
+                    min_value=-5.00, max_value=5.00, value=0.00, step=0.01,
+                    format="%.2f",
+                    help="Current Previous GPA - Historical Previous GPA. Default to 0.0 if not applicable."
                 )
 
             st.markdown("---")
@@ -310,6 +319,7 @@ def _render_manual(model, user):
             features = [
                 attendance, assignment_score, test_score,
                 study_hours, float(class_participation), previous_gpa,
+                academic_momentum,
             ]
             with st.spinner("Analysing profile…"):
                 prediction = predict_single(model, features)
@@ -322,6 +332,7 @@ def _render_manual(model, user):
                 "Study Hours":         study_hours,
                 "Class Participation": class_participation,
                 "Previous GPA":        previous_gpa,
+                "Academic_Momentum":   academic_momentum,
             }
             log_prediction(
                 student_id   = student_id or "anonymous",
@@ -490,9 +501,17 @@ def _phased_forecast(df_raw: pd.DataFrame, feat_df: pd.DataFrame,
                 gp, label = _score_to_gp(ts)
                 phase_tag = "Actual"
             else:
-                # ── Phase N: J48 prediction ───────────────────────────────────
+                # ── Phase N: prediction ───────────────────────────────────
                 frow = feat_df.loc[i].copy()
                 frow["Previous GPA"] = round(prev_year_cgpa, 4)
+
+                if year_idx == 1:
+                    momentum = 0.0
+                else:
+                    historical_gpa = phases[year_idx - 2]["cum_cgpa"]
+                    momentum = round(prev_year_cgpa - historical_gpa, 4)
+                
+                frow["Academic_Momentum"] = momentum
 
                 feats = np.array([
                     float(frow["Attendance"]),
@@ -501,6 +520,7 @@ def _phased_forecast(df_raw: pd.DataFrame, feat_df: pd.DataFrame,
                     float(frow["Study Hours"]),
                     float(frow["Class Participation"]),
                     float(frow["Previous GPA"]),
+                    float(frow["Academic_Momentum"]),
                 ], dtype=float).reshape(1, -1)
 
                 label = model.predict(feats)[0]
@@ -574,8 +594,8 @@ def _render_timeline(model, user):
         <b style='color:#60a5fa;'>📋 Phased Year-by-Year CGPA Forecast:</b>
         <ol style='color:#a3b3d4; margin:0.5rem 0 0 0; font-size:0.88rem;'>
             <li><b>Year 1 (100L)</b> — actual GPA computed directly from scores; no model used.</li>
-            <li><b>Year 2+ (200L–400L)</b> — J48 model predicts each course; previous year's
-                cumulative CGPA is threaded in as the <code>Previous GPA</code> feature.</li>
+            <li><b>Year 2+ (200L–400L)</b> — AI model predicts each course; previous year's
+                cumulative CGPA is threaded in as the <code>Previous GPA</code> feature. <code>Academic Momentum</code> is calculated automatically.</li>
             <li>Final Graduating CGPA = Σ all Quality Points ÷ Σ all Credits.</li>
         </ol>
         <div style='margin-top:0.9rem; background:#0d1117; border-radius:8px;
@@ -805,7 +825,7 @@ def _render_timeline(model, user):
             else:
                 prev = phases[phases.index(ph) - 1]
                 st.caption(
-                    f"🔮 J48 model predictions used. Previous year's cumulative CGPA "
+                    f"🔮 AI model predictions used. Previous year's cumulative CGPA "
                     f"(**{prev['cum_cgpa']:.2f}**) was passed as the Previous GPA feature "
                     f"for every {level} course."
                 )
