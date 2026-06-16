@@ -24,8 +24,7 @@ from sklearn.metrics import (
     f1_score, confusion_matrix, classification_report,
 )
 from sklearn.preprocessing import LabelEncoder
-
-from core.data_validator import FEATURE_COLUMNS, TARGET_COLUMN
+from core.data_validator import TARGET_COLUMN, FEATURE_COLS
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 DATA_DIR   = Path(__file__).resolve().parent.parent / "data"
@@ -78,7 +77,7 @@ def train_model(df: pd.DataFrame, algorithm: str = "j48") -> Tuple[Any, Dict[str
     Returns:
         (fitted_model, metrics_dict)
     """
-    X = df[FEATURE_COLUMNS].to_numpy(dtype=float)
+    X = df[FEATURE_COLS].to_numpy(dtype=float)
     y = df[TARGET_COLUMN].to_numpy(dtype=str)
 
     X_train, X_test, y_train, y_test = train_test_split(
@@ -123,7 +122,7 @@ def train_model(df: pd.DataFrame, algorithm: str = "j48") -> Tuple[Any, Dict[str
         "cm":         confusion_matrix(y_test, y_pred, labels=present),
         "cm_labels":  present,
         "report":     classification_report(y_test, y_pred, zero_division=0),
-        "feature_names": FEATURE_COLUMNS,
+        "feature_names": FEATURE_COLS,
         "class_names":   list(model.classes_),
     }
 
@@ -165,14 +164,14 @@ def predict_batch(model: Any, df: pd.DataFrame) -> pd.DataFrame:
       - ``Predicted_Performance`` — J48 decision-tree or RF class label.
       - ``Estimated_CGPA``        — heuristic CGPA on the 5.0 scale.
     """
-    X = df[FEATURE_COLUMNS].to_numpy(dtype=float)
+    X = df[FEATURE_COLS].to_numpy(dtype=float)
     df = df.copy()
     df["Predicted_Performance"] = model.predict(X)
     df["Estimated_CGPA"] = [
         estimate_cgpa(cls, gpa)
         for cls, gpa in zip(
             df["Predicted_Performance"],
-            df["Previous GPA"].to_numpy(dtype=float),
+            df["Previous_GPA"].to_numpy(dtype=float),
         )
     ]
     return df
@@ -228,7 +227,7 @@ def plot_decision_tree(model: Any,
     plot_tree(
         tree_to_plot,
         max_depth=max_depth_display,
-        feature_names=FEATURE_COLUMNS,
+        feature_names=FEATURE_COLS,
         class_names=tree_to_plot.classes_,
         filled=True,
         rounded=True,
@@ -251,13 +250,13 @@ def plot_decision_tree(model: Any,
 
 def get_text_rules(model: Any) -> str:
     tree_model = model.estimators_[0] if hasattr(model, "estimators_") else model
-    return export_text(tree_model, feature_names=FEATURE_COLUMNS, max_depth=10)
+    return export_text(tree_model, feature_names=FEATURE_COLS, max_depth=10)
 
 
 def plot_feature_importance(model: Any) -> plt.Figure:
     importances = model.feature_importances_
     indices = np.argsort(importances)[::-1]
-    sorted_features = [FEATURE_COLUMNS[i] for i in indices]
+    sorted_features = [FEATURE_COLS[i] for i in indices]
     sorted_vals     = importances[indices]
 
     colours = [

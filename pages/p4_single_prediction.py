@@ -21,7 +21,7 @@ from core.ml_engine import (
     CLASS_COLOURS, estimate_cgpa,
 )
 from core.database  import log_prediction
-from core.data_validator import FEATURE_COLUMNS
+from core.ml_engine import FEATURE_COLS
 
 # ── Class metadata ─────────────────────────────────────────────────────────────
 CLASS_META = {
@@ -105,76 +105,7 @@ _TIMELINE_OPTIONAL = {
 }
 
 
-def _map_timeline_to_features(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Convert a timeline DataFrame into the model's EXACT feature space,
-    enforcing the strict FEATURE_COLUMNS order:
-      [Attendance, Assignment Score, Test Score, Study Hours,
-       Class Participation, Previous GPA]
-
-    Score normalisation
-    -------------------
-    The template uses Nigerian university conventions:
-      CA_Score   : out of 40  →  scaled to 0–100 by multiplying × 2.5
-      Exam_Score : out of 60  →  scaled to 0–100 by multiplying × 1.667
-      Total_Score: CA + Exam  →  0–100, used as Test Score
-
-    Assignment Score = CA_Score × 2.5   (CA component, normalised to 100)
-    Test Score       = Total_Score       (combined final score, already 0–100)
-
-    'Previous GPA' is initialised to 0 here and updated row-by-row
-    by the calling loop.
-    """
-    # ── Require Total_Score (caller must compute before calling this) ──────
-    if "Total_Score" not in df.columns:
-        raise ValueError("Total_Score column missing — compute before calling _map_timeline_to_features.")
-
-    out = pd.DataFrame(index=df.index)
-
-    # Strict FEATURE_COLUMNS order ─────────────────────────────────────────
-    # 1. Attendance (0-100 %)
-    out["Attendance"] = (
-        pd.to_numeric(df["Attendance_Pct"], errors="coerce")
-        .clip(0, 100)
-        .fillna(75.0)
-    )
-
-    # 2. Assignment Score — CA scaled from 0-40 to 0-100
-    out["Assignment Score"] = (
-        pd.to_numeric(df["CA_Score"], errors="coerce")
-        .clip(0, 40)
-        .mul(2.5)          # 40 × 2.5 = 100
-        .fillna(50.0)
-    )
-
-    # 3. Test Score — Total (CA + Exam) already 0-100
-    out["Test Score"] = (
-        pd.to_numeric(df["Total_Score"], errors="coerce")
-        .clip(0, 100)
-        .fillna(50.0)
-    )
-
-    # 4. Study Hours (optional column, default 10)
-    if "Study_Hours_Week" in df.columns:
-        sh = pd.to_numeric(df["Study_Hours_Week"], errors="coerce").clip(0, 168)
-    else:
-        sh = pd.Series(_TIMELINE_OPTIONAL["Study_Hours_Week"], index=df.index, dtype=float)
-    out["Study Hours"] = sh.fillna(_TIMELINE_OPTIONAL["Study_Hours_Week"])
-
-    # 5. Class Participation (optional column, default 3)
-    if "Class_Participation" in df.columns:
-        cp = pd.to_numeric(df["Class_Participation"], errors="coerce").clip(1, 5).round()
-    else:
-        cp = pd.Series(_TIMELINE_OPTIONAL["Class_Participation"], index=df.index, dtype=float)
-    out["Class Participation"] = cp.fillna(_TIMELINE_OPTIONAL["Class_Participation"]).astype(int)
-
-    # 6. Previous GPA — threaded row-by-row by the calling loop; seed with 0
-    out["Previous GPA"] = 0.0
-
-    # 7. Academic Momentum — threaded by the calling loop
-    out["Academic_Momentum"] = 0.0
-
-    return out
+# Removed _map_timeline_to_features as we now use raw data and vectorised prediction.
 
 
 # ── CGPA colour helper ─────────────────────────────────────────────────────────
@@ -268,15 +199,15 @@ def _render_manual(model, user):
                     min_value=0.0, max_value=100.0, value=75.0, step=0.5,
                     help="Percentage of classes attended (0–100)"
                 )
-                assignment_score = st.number_input(
-                    "Assignment Score",
-                    min_value=0.0, max_value=100.0, value=70.0, step=0.5,
-                    help="Total assignment score (0–100)"
+                ca_score = st.number_input(
+                    "CA Score",
+                    min_value=0.0, max_value=40.0, value=30.0, step=0.5,
+                    help="Continuous Assessment score (0–40)"
                 )
-                test_score = st.number_input(
-                    "Test Score",
-                    min_value=0.0, max_value=100.0, value=65.0, step=0.5,
-                    help="Examination/test score (0–100)"
+                exam_score = st.number_input(
+                    "Exam Score",
+                    min_value=0.0, max_value=60.0, value=45.0, step=0.5,
+                    help="Examination score (0–60)"
                 )
 
             with col2:
@@ -316,8 +247,9 @@ def _render_manual(model, user):
             )
 
         if submitted:
+            total_score = ca_score + exam_score
             features = [
-                attendance, assignment_score, test_score,
+                attendance, ca_score, exam_score, total_score,
                 study_hours, float(class_participation), previous_gpa,
                 academic_momentum,
             ]
@@ -326,12 +258,13 @@ def _render_manual(model, user):
                 cgpa       = estimate_cgpa(prediction, previous_gpa)
 
             input_dict = {
-                "Attendance":          attendance,
-                "Assignment Score":    assignment_score,
-                "Test Score":          test_score,
-                "Study Hours":         study_hours,
-                "Class Participation": class_participation,
-                "Previous GPA":        previous_gpa,
+                "Attendance_Pct":      attendance,
+                "CA_Score":            ca_score,
+                "Exam_Score":          exam_score,
+                "Total_Score":         total_score,
+                "Study_Hours_Week":    study_hours,
+                "Class_Participation": class_participation,
+                "Previous_GPA":        previous_gpa,
                 "Academic_Momentum":   academic_momentum,
             }
             log_prediction(
@@ -443,104 +376,93 @@ def _render_manual(model, user):
 _LEVEL_ORDER = ["100L", "200L", "300L", "400L"]
 
 
-def _phased_forecast(df_raw: pd.DataFrame, feat_df: pd.DataFrame,
+def _phased_forecast(df_raw: pd.DataFrame,
                      model) -> tuple[list[dict], pd.DataFrame]:
     """
-    Run the phased year-by-year CGPA forecast.
+    Run the phased year-by-year CGPA forecast using vectorised predictions.
 
     Phase 1 (100L)  — actual GPA via direct score→GP mapping; no J48.
-    Phase N (200L+) — J48 prediction with previous year's cumulative CGPA
-                      threaded in as the 'Previous GPA' feature for every
-                      course in that level.
-
-    Returns
-    -------
-    phases : list of dicts, one per level, each containing:
-        level, is_actual, year_cgpa, cum_cgpa, course_df
-    df_out : full result DataFrame with all appended columns
+    Phase N (200L+) — AI prediction with previous year's cumulative CGPA
+                      threaded in as the 'Previous_GPA' feature for every
+                      course in that level, alongside calculated Momentum.
     """
-    # Collect levels present in the data, in canonical order
-    present_levels = [
-        lv for lv in _LEVEL_ORDER
-        if lv in df_raw["Level"].values
-    ]
-    # Fall back: include any unrecognised levels alphabetically
+    present_levels = [lv for lv in _LEVEL_ORDER if lv in df_raw["Level"].values]
     extra = sorted(set(df_raw["Level"].values) - set(_LEVEL_ORDER))
     present_levels += extra
 
     df_out = df_raw.copy()
-    # Initialise output columns
+    
+    # Ensure all required features exist with defaults
+    for col in FEATURE_COLS:
+        if col not in df_out.columns:
+            df_out[col] = 0.0
+
     df_out["Phase"]                 = ""
     df_out["Predicted_Performance"] = ""
     df_out["Predicted_Grade_Point"] = 0
     df_out["Quality_Points"]        = 0.0
     df_out["Cumulative_CGPA_After"] = 0.0
 
-    # Accumulators across all years
     global_qp      = 0.0
     global_credits = 0.0
-    prev_year_cgpa = 0.0   # handed to next year's J48 as Previous GPA
+    prev_year_cgpa = 0.0
 
     phases = []
 
     for year_idx, level in enumerate(present_levels):
-        mask   = df_raw["Level"] == level
-        idx    = df_raw.index[mask]
-        is_yr1 = (year_idx == 0)          # True → use actual GPA rule
+        mask   = df_out["Level"] == level
+        idx    = df_out.index[mask]
+        level_df = df_out.loc[idx].copy()
 
-        year_qp      = 0.0
-        year_credits = 0.0
-        level_results = []
+        is_yr1 = (year_idx == 0)
 
-        for i in idx:
-            cr  = float(pd.to_numeric(df_raw.loc[i, "Credits"], errors="coerce") or 0)
-            ts  = float(df_raw.loc[i, "Total_Score"])
-
-            if is_yr1:
-                # ── Phase 1: actual grade point from raw score ────────────────
-                gp, label = _score_to_gp(ts)
-                phase_tag = "Actual"
+        # Broadcast calculated values
+        if is_yr1:
+            level_df['Previous_GPA'] = 0.0
+            level_df['Academic_Momentum'] = 0.0
+        else:
+            level_df['Previous_GPA'] = round(prev_year_cgpa, 4)
+            if year_idx == 1:
+                momentum = 0.0
             else:
-                # ── Phase N: prediction ───────────────────────────────────
-                frow = feat_df.loc[i].copy()
-                frow["Previous GPA"] = round(prev_year_cgpa, 4)
+                historical_gpa = phases[year_idx - 2]["cum_cgpa"]
+                momentum = round(prev_year_cgpa - historical_gpa, 4)
+            level_df['Academic_Momentum'] = momentum
 
-                if year_idx == 1:
-                    momentum = 0.0
-                else:
-                    historical_gpa = phases[year_idx - 2]["cum_cgpa"]
-                    momentum = round(prev_year_cgpa - historical_gpa, 4)
-                
-                frow["Academic_Momentum"] = momentum
+        # Write back to df_out for the record
+        df_out.loc[idx, 'Previous_GPA'] = level_df['Previous_GPA']
+        df_out.loc[idx, 'Academic_Momentum'] = level_df['Academic_Momentum']
 
-                feats = np.array([
-                    float(frow["Attendance"]),
-                    float(frow["Assignment Score"]),
-                    float(frow["Test Score"]),
-                    float(frow["Study Hours"]),
-                    float(frow["Class Participation"]),
-                    float(frow["Previous GPA"]),
-                    float(frow["Academic_Momentum"]),
-                ], dtype=float).reshape(1, -1)
+        # Extract exactly the required features in the correct order
+        X_predict = level_df[FEATURE_COLS].apply(pd.to_numeric, errors='coerce').fillna(0)
 
-                label = model.predict(feats)[0]
-                gp    = GRADE_POINTS.get(label, 0)
-                phase_tag = "Predicted"
-
-            qp = gp * cr
-
-            year_qp      += qp
-            year_credits += cr
+        if is_yr1:
+            def apply_score_gp(row):
+                return _score_to_gp(row['Total_Score'])
             
-            level_results.append({
-                "index": i,
-                "cr": cr,
-                "ts": ts,
-                "gp": gp,
-                "label": label,
-                "phase_tag": phase_tag,
-                "qp": qp
-            })
+            res = level_df.apply(apply_score_gp, axis=1, result_type='expand')
+            res.columns = ['gp', 'label']
+            
+            level_df["Predicted_Grade_Point"] = res["gp"].astype(int)
+            level_df["Predicted_Performance"] = res["label"]
+            phase_tag = "Actual"
+        else:
+            predictions = model.predict(X_predict.to_numpy(dtype=float))
+            level_df["Predicted_Performance"] = predictions
+            level_df["Predicted_Grade_Point"] = level_df["Predicted_Performance"].map(lambda x: GRADE_POINTS.get(x, 0)).astype(int)
+            phase_tag = "Predicted"
+
+        df_out.loc[idx, 'Predicted_Performance'] = level_df['Predicted_Performance']
+        df_out.loc[idx, 'Predicted_Grade_Point'] = level_df['Predicted_Grade_Point']
+        df_out.loc[idx, 'Phase'] = phase_tag
+
+        cr = pd.to_numeric(level_df["Credits"], errors='coerce').fillna(0).astype(float)
+        qp = level_df["Predicted_Grade_Point"] * cr
+
+        df_out.loc[idx, 'Quality_Points'] = qp
+
+        year_qp = qp.sum()
+        year_credits = cr.sum()
 
         global_qp += year_qp
         global_credits += year_credits
@@ -548,26 +470,20 @@ def _phased_forecast(df_raw: pd.DataFrame, feat_df: pd.DataFrame,
         cum_cgpa = round(global_qp / global_credits, 4) if global_credits > 0 else 0.0
         year_cgpa = round(year_qp / year_credits, 2) if year_credits > 0 else 0.0
 
-        course_rows = []
-        for res in level_results:
-            i = res["index"]
-            # Write back to df_out
-            df_out.at[i, "Phase"]                 = res["phase_tag"]
-            df_out.at[i, "Predicted_Performance"] = res["label"]
-            df_out.at[i, "Predicted_Grade_Point"] = res["gp"]
-            df_out.at[i, "Quality_Points"]        = res["qp"]
-            df_out.at[i, "Cumulative_CGPA_After"] = round(cum_cgpa, 2)
+        df_out.loc[idx, 'Cumulative_CGPA_After'] = round(cum_cgpa, 2)
 
+        course_rows = []
+        for i, row in level_df.iterrows():
             course_rows.append({
-                "Course_Code":   df_raw.loc[i, "Course_Code"] if "Course_Code" in df_raw.columns else str(i),
-                "Semester":      df_raw.loc[i, "Semester"] if "Semester" in df_raw.columns else "",
-                "Credits":       res["cr"],
-                "Total_Score":   round(res["ts"], 1),
-                "Performance":   res["label"],
-                "Grade_Point":   res["gp"],
-                "Quality_Points": round(res["qp"], 1),
+                "Course_Code":   row.get("Course_Code", str(i)),
+                "Semester":      row.get("Semester", ""),
+                "Credits":       cr.loc[i],
+                "Total_Score":   round(row.get("Total_Score", 0), 1),
+                "Performance":   row["Predicted_Performance"],
+                "Grade_Point":   row["Predicted_Grade_Point"],
+                "Quality_Points": round(qp.loc[i], 1),
                 "Cum_CGPA":      round(cum_cgpa, 2),
-                "Phase":         res["phase_tag"],
+                "Phase":         phase_tag,
             })
 
         phases.append({
@@ -580,7 +496,6 @@ def _phased_forecast(df_raw: pd.DataFrame, feat_df: pd.DataFrame,
             "course_df": pd.DataFrame(course_rows),
         })
 
-        # Pass this year's cumulative CGPA to the next year
         prev_year_cgpa = cum_cgpa
 
     return phases, df_out
@@ -671,16 +586,10 @@ def _render_timeline(model, user):
         + pd.to_numeric(df_raw["Exam_Score"], errors="coerce").fillna(0)
     ).clip(0, 100)
 
-    try:
-        feat_df = _map_timeline_to_features(df_raw)
-    except Exception as e:
-        st.error(f"❌ Feature mapping failed: {e}")
-        return
-
     # ── Run phased engine ─────────────────────────────────────────────────────
     with st.spinner("Running phased year-by-year forecast…"):
         try:
-            phases, df_out = _phased_forecast(df_raw, feat_df, model)
+            phases, df_out = _phased_forecast(df_raw, model)
         except Exception as e:
             st.error(f"❌ Forecast engine error: {e}")
             return

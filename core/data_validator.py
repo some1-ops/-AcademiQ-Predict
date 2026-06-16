@@ -7,30 +7,20 @@ import pandas as pd
 from typing import Tuple, List
 
 # ── Required schema ───────────────────────────────────────────────────────────
-REQUIRED_COLUMNS = [
-    "Student ID",
-    "Attendance",
-    "Assignment Score",
-    "Test Score",
-    "Study Hours",
-    "Class Participation",
-    "Previous GPA",
-    "Academic_Momentum",
-    "Performance Class",
-]
+FEATURE_COLS = ['Attendance_Pct', 'CA_Score', 'Exam_Score', 'Total_Score', 'Study_Hours_Week', 'Class_Participation', 'Previous_GPA', 'Academic_Momentum']
 
-FEATURE_COLUMNS = [c for c in REQUIRED_COLUMNS if c not in ("Student ID", "Performance Class")]
-
+REQUIRED_COLUMNS = ["Student ID"] + FEATURE_COLS + ["Performance Class"]
 TARGET_COLUMN   = "Performance Class"
 VALID_CLASSES   = {"Excellent", "Good", "Average", "Poor", "Fail"}
 
 RANGE_RULES = {
-    "Attendance":          (0,   100),
-    "Assignment Score":    (0,   100),
-    "Test Score":          (0,   100),
-    "Study Hours":         (0,   168),
-    "Class Participation": (1,   5),
-    "Previous GPA":        (0.0, 4.0),
+    "Attendance_Pct":      (0, 100),
+    "CA_Score":            (0, 40),
+    "Exam_Score":          (0, 60),
+    "Total_Score":         (0, 100),
+    "Study_Hours_Week":    (0, 168),
+    "Class_Participation": (1, 5),
+    "Previous_GPA":        (0.0, 5.0),
     "Academic_Momentum":   (-5.0, 5.0),
 }
 
@@ -95,7 +85,7 @@ def preprocess_dataset(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # Drop rows missing any feature or target
-    df.dropna(subset=FEATURE_COLUMNS + [TARGET_COLUMN], inplace=True)
+    df.dropna(subset=FEATURE_COLS + [TARGET_COLUMN], inplace=True)
 
     # Clip ranges
     for col, (lo, hi) in RANGE_RULES.items():
@@ -103,8 +93,8 @@ def preprocess_dataset(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = df[col].clip(lower=lo, upper=hi)
 
     # Ensure Class Participation is integer
-    if "Class Participation" in df.columns:
-        df["Class Participation"] = df["Class Participation"].round().astype(int)
+    if "Class_Participation" in df.columns:
+        df["Class_Participation"] = df["Class_Participation"].round().astype(int)
 
     # Normalise target labels (strip whitespace)
     df[TARGET_COLUMN] = df[TARGET_COLUMN].str.strip().str.title()

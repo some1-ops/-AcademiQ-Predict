@@ -13,49 +13,49 @@ CLASSES = ["Excellent", "Good", "Average", "Poor", "Fail"]
 # Format: {class: {feature: (mean, std)}}
 _DISTS = {
     "Excellent": {
-        "Attendance":         (92, 4),
-        "Assignment Score":   (88, 5),
-        "Test Score":         (90, 5),
-        "Study Hours":        (20, 4),
-        "Class Participation": (4.6, 0.4),
-        "Previous GPA":       (3.8, 0.2),
-        "Academic_Momentum":  (0.2, 0.3),
+        "Attendance_Pct":      (92, 4),
+        "CA_Score":            (35, 3),
+        "Exam_Score":          (55, 3),
+        "Study_Hours_Week":    (20, 4),
+        "Class_Participation": (4.6, 0.4),
+        "Previous_GPA":        (3.8, 0.2),
+        "Academic_Momentum":   (0.2, 0.3),
     },
     "Good": {
-        "Attendance":         (80, 6),
-        "Assignment Score":   (74, 6),
-        "Test Score":         (76, 6),
-        "Study Hours":        (14, 4),
-        "Class Participation": (3.7, 0.5),
-        "Previous GPA":       (3.1, 0.3),
-        "Academic_Momentum":  (0.1, 0.2),
+        "Attendance_Pct":      (80, 6),
+        "CA_Score":            (30, 4),
+        "Exam_Score":          (46, 5),
+        "Study_Hours_Week":    (14, 4),
+        "Class_Participation": (3.7, 0.5),
+        "Previous_GPA":        (3.1, 0.3),
+        "Academic_Momentum":   (0.1, 0.2),
     },
     "Average": {
-        "Attendance":         (68, 7),
-        "Assignment Score":   (60, 7),
-        "Test Score":         (61, 7),
-        "Study Hours":        (9, 3),
-        "Class Participation": (2.8, 0.6),
-        "Previous GPA":       (2.4, 0.4),
-        "Academic_Momentum":  (-0.1, 0.3),
+        "Attendance_Pct":      (68, 7),
+        "CA_Score":            (24, 4),
+        "Exam_Score":          (37, 5),
+        "Study_Hours_Week":    (9, 3),
+        "Class_Participation": (2.8, 0.6),
+        "Previous_GPA":        (2.4, 0.4),
+        "Academic_Momentum":   (-0.1, 0.3),
     },
     "Poor": {
-        "Attendance":         (54, 8),
-        "Assignment Score":   (44, 8),
-        "Test Score":         (45, 8),
-        "Study Hours":        (5, 2),
-        "Class Participation": (2.0, 0.6),
-        "Previous GPA":       (1.8, 0.4),
-        "Academic_Momentum":  (-0.3, 0.3),
+        "Attendance_Pct":      (54, 8),
+        "CA_Score":            (18, 4),
+        "Exam_Score":          (27, 5),
+        "Study_Hours_Week":    (5, 2),
+        "Class_Participation": (2.0, 0.6),
+        "Previous_GPA":        (1.8, 0.4),
+        "Academic_Momentum":   (-0.3, 0.3),
     },
     "Fail": {
-        "Attendance":         (38, 10),
-        "Assignment Score":   (28, 8),
-        "Test Score":         (27, 8),
-        "Study Hours":        (2, 1.5),
-        "Class Participation": (1.3, 0.4),
-        "Previous GPA":       (1.0, 0.4),
-        "Academic_Momentum":  (-0.5, 0.2),
+        "Attendance_Pct":      (38, 10),
+        "CA_Score":            (11, 4),
+        "Exam_Score":          (16, 5),
+        "Study_Hours_Week":    (2, 1.5),
+        "Class_Participation": (1.3, 0.4),
+        "Previous_GPA":        (1.0, 0.4),
+        "Academic_Momentum":   (-0.5, 0.2),
     },
 }
 
@@ -83,31 +83,33 @@ def generate_mock_dataset(seed: int = 42) -> pd.DataFrame:
         student_counter += n
 
         # Continuous features — clamp to valid range
-        rows["Attendance"] = np.clip(
-            rng.normal(dist["Attendance"][0], dist["Attendance"][1], n), 0, 100
+        rows["Attendance_Pct"] = np.clip(
+            rng.normal(dist["Attendance_Pct"][0], dist["Attendance_Pct"][1], n), 0, 100
         ).round(1)
 
-        rows["Assignment Score"] = np.clip(
-            rng.normal(dist["Assignment Score"][0], dist["Assignment Score"][1], n), 0, 100
+        rows["CA_Score"] = np.clip(
+            rng.normal(dist["CA_Score"][0], dist["CA_Score"][1], n), 0, 40
         ).round(1)
 
-        rows["Test Score"] = np.clip(
-            rng.normal(dist["Test Score"][0], dist["Test Score"][1], n), 0, 100
+        rows["Exam_Score"] = np.clip(
+            rng.normal(dist["Exam_Score"][0], dist["Exam_Score"][1], n), 0, 60
         ).round(1)
+        
+        rows["Total_Score"] = rows["CA_Score"] + rows["Exam_Score"]
 
-        rows["Study Hours"] = np.clip(
-            rng.normal(dist["Study Hours"][0], dist["Study Hours"][1], n), 0, 40
+        rows["Study_Hours_Week"] = np.clip(
+            rng.normal(dist["Study_Hours_Week"][0], dist["Study_Hours_Week"][1], n), 0, 40
         ).round(1)
 
         # Ordinal 1-5
         raw_cp = rng.normal(
-            dist["Class Participation"][0], dist["Class Participation"][1], n
+            dist["Class_Participation"][0], dist["Class_Participation"][1], n
         )
-        rows["Class Participation"] = np.clip(np.round(raw_cp), 1, 5).astype(int)
+        rows["Class_Participation"] = np.clip(np.round(raw_cp), 1, 5).astype(int)
 
-        # GPA 0.0 – 4.0
-        rows["Previous GPA"] = np.clip(
-            rng.normal(dist["Previous GPA"][0], dist["Previous GPA"][1], n), 0.0, 4.0
+        # GPA 0.0 – 5.0
+        rows["Previous_GPA"] = np.clip(
+            rng.normal(dist["Previous_GPA"][0], dist["Previous_GPA"][1], n), 0.0, 5.0
         ).round(2)
 
         # Academic Momentum
