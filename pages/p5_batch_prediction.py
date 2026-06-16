@@ -42,8 +42,9 @@ def show():
         <ol style='color:#a3b3d4; margin:0.5rem 0 0 0; font-size:0.88rem;'>
             <li>Upload a CSV containing student data <em>without</em> a <code>Performance Class</code> column.</li>
             <li>The system validates the schema and runs predictions on every row.</li>
-            <li>Results appear in the table below with a new <code>Predicted_Performance</code> column.</li>
-            <li>Download the full results as a CSV file.</li>
+            <li>Results include a <code>Predicted_Performance</code> column (J48 class) and an
+                <code>Estimated_CGPA</code> column (heuristic, 5.0 scale).</li>
+            <li>Download the full results as CSV or Excel.</li>
         </ol>
     </div>
     """, unsafe_allow_html=True)
@@ -142,6 +143,29 @@ def show():
                     <div style='color:{meta_fg}88; font-size:0.75rem;'>{cls}</div>
                 </div>
                 """, unsafe_allow_html=True)
+
+        st.markdown("<br/>", unsafe_allow_html=True)
+
+        # ── CGPA summary metrics ────────────────────────────────────────────────
+        if "Estimated_CGPA" in result_df.columns:
+            cgpa_mean = result_df["Estimated_CGPA"].mean()
+            cgpa_max  = result_df["Estimated_CGPA"].max()
+            cgpa_min  = result_df["Estimated_CGPA"].min()
+
+            c1, c2, c3 = st.columns(3)
+            for col_ui, label, val, colour in [
+                (c1, "Avg Estimated CGPA", f"{cgpa_mean:.2f}", "#3b82f6"),
+                (c2, "Highest CGPA",       f"{cgpa_max:.2f}",  "#22c55e"),
+                (c3, "Lowest CGPA",        f"{cgpa_min:.2f}",  "#f97316"),
+            ]:
+                with col_ui:
+                    st.markdown(f"""
+                    <div style='background:#1e2538; border:1px solid {colour}44;
+                                border-radius:12px; padding:0.8rem 1rem; text-align:center;'>
+                        <div style='color:{colour}; font-size:1.4rem; font-weight:700;'>{val}</div>
+                        <div style='color:{colour}88; font-size:0.73rem;'>{label}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
         st.markdown("<br/>", unsafe_allow_html=True)
 

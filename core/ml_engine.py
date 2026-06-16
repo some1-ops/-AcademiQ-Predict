@@ -41,6 +41,40 @@ CLASS_COLOURS = {
     "Fail":      "#ef4444",
 }
 
+# ── CGPA baseline mapping (5.0 scale) ─────────────────────────────────────────
+# Each class maps to the lower bound of its GPA band on a 5.0 scale.
+_CLASS_GPA_MAP: dict[str, float] = {
+    "Excellent": 4.5,
+    "Good":      3.5,
+    "Average":   2.5,
+    "Poor":      1.5,
+    "Fail":      0.0,
+}
+
+
+def estimate_cgpa(predicted_class: str, previous_gpa: float) -> float:
+    """
+    Estimate cumulative GPA (5.0 scale) from the predicted performance class
+    and the student's previous GPA.
+
+    Rules
+    -----
+    - Map predicted_class → semester GPA baseline (5.0 scale).
+    - If previous_gpa == 0 (first-year / no history), return the baseline.
+    - Otherwise return (previous_gpa + semester_gpa) / 2, rounded to 2 d.p.
+
+    Args:
+        predicted_class: One of Excellent / Good / Average / Poor / Fail.
+        previous_gpa:    Student's previous GPA (0–4.0 or 0–5.0 scale input).
+
+    Returns:
+        Estimated CGPA rounded to 2 decimal places.
+    """
+    semester_gpa = _CLASS_GPA_MAP.get(predicted_class, 2.5)  # default Average
+    if previous_gpa == 0:
+        return round(semester_gpa, 2)
+    return round((previous_gpa + semester_gpa) / 2, 2)
+
 
 # ── Training ──────────────────────────────────────────────────────────────────
 def train_model(df: pd.DataFrame) -> Tuple[DecisionTreeClassifier, Dict[str, Any]]:
@@ -120,10 +154,23 @@ def predict_single(model: DecisionTreeClassifier, feature_values: list) -> str:
 
 
 def predict_batch(model: DecisionTreeClassifier, df: pd.DataFrame) -> pd.DataFrame:
-    """Predict for all rows in df. Adds 'Predicted_Performance' column."""
+    """
+    Predict for all rows in df.
+
+    Adds two columns:
+      - ``Predicted_Performance`` — J48 decision-tree class label.
+      - ``Estimated_CGPA``        — heuristic CGPA on the 5.0 scale.
+    """
     X = df[FEATURE_COLUMNS].to_numpy(dtype=float)
     df = df.copy()
     df["Predicted_Performance"] = model.predict(X)
+    df["Estimated_CGPA"] = [
+        estimate_cgpa(cls, gpa)
+        for cls, gpa in zip(
+            df["Predicted_Performance"],
+            df["Previous GPA"].to_numpy(dtype=float),
+        )
+    ]
     return df
 
 
