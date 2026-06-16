@@ -11,7 +11,7 @@ from pathlib import Path
 
 from core.auth           import require_admin, current_user
 from core.ml_engine      import load_model, predict_batch, model_is_trained, CLASS_COLOURS
-from core.data_validator import validate_prediction_input, preprocess_dataset, FEATURE_COLUMNS
+from core.data_validator import validate_prediction_input, preprocess_dataset, FEATURE_COLS
 
 
 def show():

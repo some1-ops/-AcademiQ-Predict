@@ -154,11 +154,11 @@ def show():
 
         schema = {
             "Column Name":        REQUIRED_COLUMNS,
-            "Data Type":          ["String", "Float", "Float", "Float", "Float", "Integer", "Float", "Categorical"],
-            "Valid Range / Notes":["Unique student ID", "0–100", "0–100", "0–100",
+            "Data Type":          ["String", "Float", "Float", "Float", "Float", "Float", "Integer", "Float", "Float", "Categorical"],
+            "Valid Range / Notes":["Unique student ID", "0–100", "0–40", "0–60", "0–100",
                                    "0–168 (weekly hours)", "1–5 (integer scale)",
-                                   "0.00–4.00", "Excellent / Good / Average / Poor / Fail"],
-            "Required":           ["✅"] * 8,
+                                   "0.00–5.00", "-5.00 to 5.00", "Excellent / Good / Average / Poor / Fail"],
+            "Required":           ["✅"] * 10,
         }
         st.dataframe(pd.DataFrame(schema), width='stretch', hide_index=True)
 
