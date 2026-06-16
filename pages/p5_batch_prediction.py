@@ -231,3 +231,16 @@ def show():
             file_name="batch_predictions.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+
+        # ── Early Warning Dashboard ───────────────────────────────────────
+        st.markdown("<br/>", unsafe_allow_html=True)
+        st.markdown("#### 🚨 Academic Intervention Dashboard")
+        
+        at_risk_df = result_df[result_df["Predicted_Performance"].isin(["Poor", "Fail"])]
+        if len(at_risk_df) > 0:
+            with st.container(border=True):
+                st.error(f"**Action Required:** {len(at_risk_df)} student(s) flagged as high-risk.")
+                display_cols_risk = ["Student ID", "Predicted_Performance", "Estimated_CGPA"]
+                st.dataframe(at_risk_df[[c for c in display_cols_risk if c in at_risk_df.columns]], use_container_width=True, hide_index=True)
+        else:
+            st.success("✅ No students in this batch are currently at risk of failing.")

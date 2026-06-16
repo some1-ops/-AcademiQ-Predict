@@ -12,6 +12,7 @@ from core.auth           import require_admin, current_user
 from core.data_validator import validate_dataset, preprocess_dataset, REQUIRED_COLUMNS
 from core.database       import log_dataset
 from core.mock_data      import generate_mock_dataset
+from core.utils          import convert_df_to_arff
 
 DATA_DIR    = Path(__file__).resolve().parent.parent / "data"
 UPLOADS_DIR = DATA_DIR / "uploads"
@@ -146,6 +147,16 @@ def show():
                     st.session_state["active_dataset_name"] = uploaded.name
                     st.success(f"✅ Dataset **{uploaded.name}** saved and activated!")
                     st.balloons()
+            
+            with col_btn2:
+                arff_string = convert_df_to_arff(df_clean)
+                st.download_button(
+                    label="📥 Export Dataset for WEKA (.arff)",
+                    data=arff_string.encode('utf-8'),
+                    file_name=uploaded.name.replace('.csv', '').replace('.xlsx', '') + ".arff",
+                    mime="text/plain",
+                    use_container_width=True
+                )
 
     # ── TAB 2: Schema ────────────────────────────────────────────────────────
     with tab2:
@@ -225,12 +236,26 @@ def show():
             st.info(f"✅ Mock dataset activated as: **{mock_path.name}**")
 
             csv_dl = mock_df.to_csv(index=False).encode()
-            st.download_button(
-                label="⬇️  Download Mock Dataset",
-                data=csv_dl,
-                file_name=mock_path.name,
-                mime="text/csv",
-            )
+            
+            dl_col1, dl_col2 = st.columns(2)
+            with dl_col1:
+                st.download_button(
+                    label="⬇️  Download Mock Dataset",
+                    data=csv_dl,
+                    file_name=mock_path.name,
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            
+            with dl_col2:
+                arff_string = convert_df_to_arff(mock_df, relation_name="mock_student_academic_data")
+                st.download_button(
+                    label="📥 Export Dataset for WEKA (.arff)",
+                    data=arff_string.encode('utf-8'),
+                    file_name=mock_path.name.replace('.csv', '') + ".arff",
+                    mime="text/plain",
+                    use_container_width=True
+                )
 
     # ── Active Dataset Banner ─────────────────────────────────────────────────
     active = st.session_state.get("active_dataset_name")

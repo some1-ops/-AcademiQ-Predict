@@ -364,6 +364,34 @@ def _render_manual(model, user):
                 fig.tight_layout()
                 st.pyplot(fig)
                 plt.close(fig)
+                
+                st.markdown("---")
+                with st.expander("🧠 Model Explainability (Why did the AI predict this?)"):
+                    st.markdown("Feature importance weights driving this prediction:")
+                    
+                    if hasattr(model, "feature_importances_"):
+                        fi_df = pd.DataFrame({
+                            "Feature": FEATURE_COLS,
+                            "Importance (%)": (model.feature_importances_ * 100).round(2),
+                        }).sort_values("Importance (%)", ascending=True)
+                        
+                        fig_xai, ax_xai = plt.subplots(figsize=(6, 3))
+                        fig_xai.patch.set_facecolor("#1e2130")
+                        ax_xai.set_facecolor("#1e2130")
+                        
+                        bars = ax_xai.barh(fi_df["Feature"], fi_df["Importance (%)"], color="#3b82f6", edgecolor="none")
+                        ax_xai.set_xlabel("Importance Weight (%)", color="#a3b3d4", fontsize=9)
+                        ax_xai.tick_params(colors="#a3b3d4", labelsize=8)
+                        ax_xai.spines["top"].set_visible(False)
+                        ax_xai.spines["right"].set_visible(False)
+                        ax_xai.spines["left"].set_color("#2d3555")
+                        ax_xai.spines["bottom"].set_color("#2d3555")
+                        fig_xai.tight_layout()
+                        st.pyplot(fig_xai)
+                        plt.close(fig_xai)
+                    else:
+                        st.info("Explainability is not available for this model type.")
+                        
             except Exception:
                 pass
 
@@ -852,3 +880,36 @@ def _render_timeline(model, user):
             file_name="phased_cgpa_forecast.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # 6. Early Warning Dashboard
+    # ═════════════════════════════════════════════════════════════════════════
+    st.markdown("<br/>", unsafe_allow_html=True)
+    st.markdown("#### 🚨 Academic Intervention Dashboard")
+    
+    at_risk_df = df_out[df_out["Predicted_Performance"].isin(["Poor", "Fail"])]
+    if len(at_risk_df) > 0:
+        with st.container(border=True):
+            st.error(f"**Action Required:** {len(at_risk_df)} course(s) flagged as high-risk.")
+            display_cols_risk = ["Level", "Semester", "Course_Code", "Predicted_Performance"]
+            st.dataframe(at_risk_df[display_cols_risk], use_container_width=True, hide_index=True)
+    else:
+        st.success("✅ Student is not currently at risk of failing any predicted courses. Excellent trajectory!")
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # 7. Automated PDF Report
+    # ═════════════════════════════════════════════════════════════════════════
+    from core.reports import generate_academic_report
+    st.markdown("<br/>", unsafe_allow_html=True)
+    try:
+        pdf_bytes = generate_academic_report(df_out, final_cgpa)
+        st.download_button(
+            label="📄 Download Official Academic Forecast Report (PDF)",
+            data=pdf_bytes,
+            file_name="Academic_Forecast_Report.pdf",
+            mime="application/pdf",
+            type="primary",
+            use_container_width=True
+        )
+    except Exception as e:
+        st.error(f"Could not generate PDF report: {e}")
